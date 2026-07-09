@@ -21,7 +21,7 @@ Este proyecto plantea automatizar la primera valoración manteniendo transparenc
 - **Latencia** de la API por debajo de 500 ms por cotización.
 
 ## Arquitectura
-
+```
 Scraper (Playwright) → MongoDB (raw)
 ↓
 ETL de limpieza y tipado
@@ -31,7 +31,7 @@ PostgreSQL (curated) + POIs de OSM
 XGBoost + conformal prediction (MLflow tracking)
 ↓
 FastAPI + Docker + Cloud Run
-
+```
 Doble almacén (raw en Mongo, curated en Postgres) porque la fuente devuelve datos semi estructurados y variables por anuncio. Mongo absorbe la variabilidad sin dolor, Postgres almacena la versión limpia y tipada sobre la que se modela.
 
 ## ¿Por qué intervalos y no un valor puntual?
@@ -47,6 +47,7 @@ Se ha elegido **conformal prediction** porque garantiza cobertura sin asumir nor
 
 ## Estructura del repositorio
 
+```
 housing-madrid/
 ├── docker-compose.yml         Mongo + Postgres + MLflow
 ├── .env.example               Plantilla de variables de entorno
@@ -63,6 +64,7 @@ housing-madrid/
 │   └── api/                   FastAPI para servir el modelo
 ├── notebooks/                 Análisis y EDA
 └── tests/                     Pytest
+```
 
 ## Cómo arrancar en local
 
