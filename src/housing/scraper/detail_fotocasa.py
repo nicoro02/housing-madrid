@@ -45,21 +45,42 @@ def _extract_fields(props: dict) -> dict:
     publisher = entity.get("publisher", {}) or {}
     features = realestate.get("features", {}) or {}
     energy = entity.get("energyCertificate", {}) or {}
+    agency = entity.get("agency", {}) or {}
+    date_info = realestate.get("date", {}) or {}
 
     features_map = {}
     for f in entity.get("features", []) or []:
         if isinstance(f, dict) and "type" in f:
             features_map[f["type"]] = f.get("value")
 
+    multimedia = entity.get("multimedias", []) or []
+    n_photos = sum(1 for m in multimedia if m.get("type") == "image")
+    n_videos = sum(1 for m in multimedia if m.get("type") == "video")
+    has_virtual_tour = any(m.get("type") in ("virtual_tour", "tour-virtual") for m in multimedia)
+
     return {
+        # identificadores
         "property_id": entity.get("propertyId") or realestate.get("id"),
+        "real_estate_ad_id": entity.get("realEstateAdId"),
+        # tipo
         "property_type_id": entity.get("propertyTypeId"),
         "property_subtype_id": entity.get("propertySubtypeId"),
         "transaction_type_id": entity.get("transactionTypeId"),
         "construction_type": entity.get("constructionType"),
+        "building_type": realestate.get("buildingType"),
+        "building_subtype": realestate.get("buildingSubtype"),
+        "purchase_type": entity.get("purchaseType"),
+        # fechas
         "creation_date": entity.get("creationDate"),
+        "alter_date": realestate.get("alterDate"),
+        "days_online": date_info.get("diff"),
+        "date_unit": date_info.get("unit"),
+        # precio
         "price_eur": price.get("amount"),
+        "price_amount_drop": price.get("amountDrop"),
         "price_periodicity": price.get("periodicity"),
+        "reduced_price": realestate.get("reducedPrice"),
+        # direccion
         "province": address.get("province"),
         "municipality": address.get("municipality"),
         "locality": address.get("locality"),
@@ -71,10 +92,16 @@ def _extract_fields(props: dict) -> dict:
         "latitude": coordinates.get("lat"),
         "longitude": coordinates.get("lng"),
         "location_is_exact": address.get("isExact"),
+        "location_accuracy": realestate.get("accuracy"),
+        "combined_location_id": address.get("combinedLocationId"),
+        "visibility_mode": address.get("visibilityMode"),
+        # features numericas
         "surface_m2": features.get("surface"),
         "surface_land_m2": features.get("surfaceLand"),
+        "ground_surface": entity.get("groundSurface"),
         "rooms": features.get("rooms"),
         "bathrooms": features.get("bathrooms"),
+        # features categoricas
         "floor": features_map.get("FLOOR"),
         "orientation": features_map.get("ORIENTATION"),
         "antiquity": features_map.get("ANTIQUITY"),
@@ -84,16 +111,47 @@ def _extract_fields(props: dict) -> dict:
         "hot_water": features_map.get("HOT_WATER"),
         "heating": features_map.get("HEATING"),
         "occupancy_status": features_map.get("OCCUPANCY_STATUS"),
+        "conservation_state": features.get("conservationState"),
+        # extras
         "extra_features": entity.get("extraFeatures", []),
+        "other_features_ids": realestate.get("otherFeaturesIds", []),
+        # energia
         "energy_efficiency_rating": energy.get("energyEfficiencyRatingType"),
         "energy_efficiency_value": energy.get("energyEfficiency"),
         "environment_impact_rating": energy.get("environmentImpactRatingType"),
         "environment_impact_value": energy.get("environmentImpact"),
+        # estado legal
+        "is_auctioned": entity.get("isAuctioned"),
+        "is_bare_ownership": entity.get("isBareOwnership"),
+        "is_occupied": entity.get("isOccupied"),
+        "is_rented_with_tenants": entity.get("isRentedWithTenants"),
+        "is_temporary_rental": entity.get("isTemporaryRental"),
+        # flags de anuncio
+        "is_new": realestate.get("isNew"),
+        "is_new_construction": realestate.get("isNewConstruction"),
+        "is_opportunity": realestate.get("isOpportunity"),
+        "is_premium": realestate.get("isPremium"),
+        "is_pack_advance_priority": realestate.get("isPackAdvancePriority"),
+        "is_pack_premium_priority": realestate.get("isPackPremiumPriority"),
+        "has_open_house": realestate.get("hasOpenHouse"),
+        "has_quality_seal": realestate.get("hasQualitySeal"),
+        "is_virtual_tour": realestate.get("isVirtualTour"),
+        "highlight": realestate.get("highlight"),
+        "quality_rate": entity.get("qualityRate"),
+        # multimedia
+        "n_photos": n_photos,
+        "n_videos": n_videos,
+        "has_virtual_tour_multimedia": has_virtual_tour,
+        "n_total_multimedia": len(multimedia),
+        # publisher / agency
         "publisher_id": publisher.get("id"),
         "publisher_name": publisher.get("name"),
         "publisher_alias": publisher.get("alias"),
         "publisher_type": publisher.get("type"),
         "reference": publisher.get("reference"),
+        "client_type_id": realestate.get("clientTypeId"),
+        "agency_type": agency.get("type"),
+        # descripcion
         "description": entity.get("description"),
         "title": props.get("propertyTitle"),
     }
