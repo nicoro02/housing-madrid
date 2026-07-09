@@ -1,9 +1,10 @@
-"""Scraper de detalle para Fotocasa. Extrae datos del JSON embebido."""
+"""Scraper de detalle para Fotocasa con rotación de sesión y anti-bloqueo."""
 from __future__ import annotations
 
 import json
 import random
 import sys
+import time
 from datetime import datetime, timezone
 
 from playwright.sync_api import sync_playwright
@@ -11,10 +12,19 @@ from playwright.sync_api import sync_playwright
 from ..config import settings
 from ..db import get_mongo_db
 
-CHROME_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0",
+]
+
+RESTART_EVERY_N = 80
+DELAY_MIN_SEC = 5.0
+DELAY_MAX_SEC = 12.0
+MAX_CONSECUTIVE_BLOCKS = 8
+PAUSE_AFTER_RESTART_SEC = 20
 
 
 def _accept_cookies(page):
@@ -22,6 +32,31 @@ def _accept_cookies(page):
         page.locator("#didomi-notice-agree-button").click(timeout=5000)
     except Exception:
         pass
+
+
+def _launch_context(playwright):
+    ua = random.choice(USER_AGENTS)
+    viewport_w = random.randint(1280, 1440)
+    viewport_h = random.randint(720, 900)
+    browser = playwright.chromium.launch(headless=False)
+    context = browser.new_context(
+        user_agent=ua,
+        locale="es-ES",
+        viewport={"width": viewport_w, "height": viewport_h},
+    )
+    context.add_init_script(
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    )
+    print(f"[detail]   navegador nuevo: UA={ua[:50]}... viewport={viewport_w}x{viewport_h}")
+    return browser, context
+
+
+def _prepare_session(context):
+    page = context.new_page()
+    page.goto("https://www.fotocasa.es", wait_until="domcontentloaded", timeout=45000)
+    _accept_cookies(page)
+    page.wait_for_timeout(2000)
+    return page
 
 
 def _extract_initial_props(page) -> dict | None:
@@ -59,10 +94,8 @@ def _extract_fields(props: dict) -> dict:
     has_virtual_tour = any(m.get("type") in ("virtual_tour", "tour-virtual") for m in multimedia)
 
     return {
-        # identificadores
         "property_id": entity.get("propertyId") or realestate.get("id"),
         "real_estate_ad_id": entity.get("realEstateAdId"),
-        # tipo
         "property_type_id": entity.get("propertyTypeId"),
         "property_subtype_id": entity.get("propertySubtypeId"),
         "transaction_type_id": entity.get("transactionTypeId"),
@@ -70,17 +103,14 @@ def _extract_fields(props: dict) -> dict:
         "building_type": realestate.get("buildingType"),
         "building_subtype": realestate.get("buildingSubtype"),
         "purchase_type": entity.get("purchaseType"),
-        # fechas
         "creation_date": entity.get("creationDate"),
         "alter_date": realestate.get("alterDate"),
         "days_online": date_info.get("diff"),
         "date_unit": date_info.get("unit"),
-        # precio
         "price_eur": price.get("amount"),
         "price_amount_drop": price.get("amountDrop"),
         "price_periodicity": price.get("periodicity"),
         "reduced_price": realestate.get("reducedPrice"),
-        # direccion
         "province": address.get("province"),
         "municipality": address.get("municipality"),
         "locality": address.get("locality"),
@@ -95,13 +125,11 @@ def _extract_fields(props: dict) -> dict:
         "location_accuracy": realestate.get("accuracy"),
         "combined_location_id": address.get("combinedLocationId"),
         "visibility_mode": address.get("visibilityMode"),
-        # features numericas
         "surface_m2": features.get("surface"),
         "surface_land_m2": features.get("surfaceLand"),
         "ground_surface": entity.get("groundSurface"),
         "rooms": features.get("rooms"),
         "bathrooms": features.get("bathrooms"),
-        # features categoricas
         "floor": features_map.get("FLOOR"),
         "orientation": features_map.get("ORIENTATION"),
         "antiquity": features_map.get("ANTIQUITY"),
@@ -112,21 +140,17 @@ def _extract_fields(props: dict) -> dict:
         "heating": features_map.get("HEATING"),
         "occupancy_status": features_map.get("OCCUPANCY_STATUS"),
         "conservation_state": features.get("conservationState"),
-        # extras
         "extra_features": entity.get("extraFeatures", []),
         "other_features_ids": realestate.get("otherFeaturesIds", []),
-        # energia
         "energy_efficiency_rating": energy.get("energyEfficiencyRatingType"),
         "energy_efficiency_value": energy.get("energyEfficiency"),
         "environment_impact_rating": energy.get("environmentImpactRatingType"),
         "environment_impact_value": energy.get("environmentImpact"),
-        # estado legal
         "is_auctioned": entity.get("isAuctioned"),
         "is_bare_ownership": entity.get("isBareOwnership"),
         "is_occupied": entity.get("isOccupied"),
         "is_rented_with_tenants": entity.get("isRentedWithTenants"),
         "is_temporary_rental": entity.get("isTemporaryRental"),
-        # flags de anuncio
         "is_new": realestate.get("isNew"),
         "is_new_construction": realestate.get("isNewConstruction"),
         "is_opportunity": realestate.get("isOpportunity"),
@@ -138,12 +162,10 @@ def _extract_fields(props: dict) -> dict:
         "is_virtual_tour": realestate.get("isVirtualTour"),
         "highlight": realestate.get("highlight"),
         "quality_rate": entity.get("qualityRate"),
-        # multimedia
         "n_photos": n_photos,
         "n_videos": n_videos,
         "has_virtual_tour_multimedia": has_virtual_tour,
         "n_total_multimedia": len(multimedia),
-        # publisher / agency
         "publisher_id": publisher.get("id"),
         "publisher_name": publisher.get("name"),
         "publisher_alias": publisher.get("alias"),
@@ -151,7 +173,6 @@ def _extract_fields(props: dict) -> dict:
         "reference": publisher.get("reference"),
         "client_type_id": realestate.get("clientTypeId"),
         "agency_type": agency.get("type"),
-        # descripcion
         "description": entity.get("description"),
         "title": props.get("propertyTitle"),
     }
@@ -160,7 +181,15 @@ def _extract_fields(props: dict) -> dict:
 def scrape_detail(page, url: str) -> dict:
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
     page.wait_for_timeout(2500)
-    html = page.content()
+    try:
+        html = page.content()
+    except Exception:
+        return {
+            "url": url,
+            "scraped_at": datetime.now(timezone.utc),
+            "blocked": False,
+            "error": "no se pudo obtener html",
+        }
     blocked = any(
         m in html.lower() for m in ("cloudflare", "just a moment", "captcha", "denegado")
     )
@@ -189,7 +218,7 @@ def run(n_urls: int = 5) -> None:
     details_coll = db["listings_raw"]
     details_coll.create_index("url", unique=True)
 
-    already = set(d["url"] for d in details_coll.find({}, {"url": 1}))
+    already = set(d["url"] for d in details_coll.find({"blocked": {"$ne": True}}, {"url": 1}))
     all_urls = [d["url"] for d in urls_coll.find({}, {"url": 1})]
     urls = [u for u in all_urls if u not in already][:n_urls]
 
@@ -198,20 +227,31 @@ def run(n_urls: int = 5) -> None:
         return
 
     print(f"[detail] procesando {len(urls)} URLs")
+    print(f"[detail] rotacion cada {RESTART_EVERY_N} URLs, delay {DELAY_MIN_SEC}-{DELAY_MAX_SEC}s, corte por bloqueos: {MAX_CONSECUTIVE_BLOCKS}")
+
+    consecutive_blocks = 0
+    processed = 0
+    ok_count = 0
+    blocked_count = 0
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(user_agent=CHROME_UA, locale="es-ES")
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-        page = context.new_page()
-
-        page.goto("https://www.fotocasa.es", wait_until="domcontentloaded", timeout=45000)
-        _accept_cookies(page)
-        page.wait_for_timeout(1500)
+        browser, context = _launch_context(p)
+        page = _prepare_session(context)
 
         for i, url in enumerate(urls, 1):
+            if i > 1 and (i - 1) % RESTART_EVERY_N == 0:
+                print(f"\n[detail] === rotando navegador (URL {i}/{len(urls)}) ===")
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                pause = PAUSE_AFTER_RESTART_SEC + random.uniform(0, 15)
+                print(f"[detail]   pausa de {pause:.1f}s antes de reabrir")
+                time.sleep(pause)
+                browser, context = _launch_context(p)
+                page = _prepare_session(context)
+                consecutive_blocks = 0
+
             print(f"\n[detail] {i}/{len(urls)}: {url}")
             try:
                 result = scrape_detail(page, url)
@@ -221,8 +261,15 @@ def run(n_urls: int = 5) -> None:
 
             if result.get("blocked"):
                 print("[detail]   BLOQUEADO")
+                blocked_count += 1
+                consecutive_blocks += 1
+                if consecutive_blocks >= MAX_CONSECUTIVE_BLOCKS:
+                    print(f"\n[detail] === STOP: {consecutive_blocks} bloqueos seguidos ===")
+                    print(f"[detail] procesados: {processed}, OK: {ok_count}, bloqueados: {blocked_count}")
+                    break
             elif result.get("error"):
                 print(f"[detail]   {result['error']}")
+                consecutive_blocks = 0
             else:
                 print(
                     f"[detail]   OK  {result.get('price_eur')}EUR  "
@@ -230,15 +277,22 @@ def run(n_urls: int = 5) -> None:
                     f"{result.get('rooms')}h/{result.get('bathrooms')}b  "
                     f"{result.get('municipality')}, {result.get('neighborhood')}"
                 )
+                ok_count += 1
+                consecutive_blocks = 0
 
             details_coll.replace_one({"url": url}, result, upsert=True)
+            processed += 1
 
-            delay = random.uniform(
-                settings.scrape_min_delay_sec, settings.scrape_max_delay_sec
-            )
+            delay = random.uniform(DELAY_MIN_SEC, DELAY_MAX_SEC)
             page.wait_for_timeout(int(delay * 1000))
 
-        browser.close()
+        try:
+            browser.close()
+        except Exception:
+            pass
+
+    print(f"\n[detail] === FINAL ===")
+    print(f"[detail] procesados: {processed}, OK: {ok_count}, bloqueados: {blocked_count}")
 
 
 if __name__ == "__main__":
