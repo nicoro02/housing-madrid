@@ -1,0 +1,40 @@
+# Config y utilidades
+python-dotenv>=1.0
+pydantic>=2.9
+pydantic-settings>=2.5
+
+# Scraping
+playwright>=1.48
+beautifulsoup4>=4.12
+lxml>=5.3
+tenacity>=9.0
+
+# Databases
+pymongo>=4.10
+psycopg[binary]>=3.2
+sqlalchemy>=2.0
+
+# Data y modelo
+pandas>=2.2
+numpy>=2.1
+scikit-learn>=1.5
+xgboost>=2.1
+lightgbm>=4.5
+mapie>=0.9
+
+# Geo
+geopy>=2.4
+shapely>=2.0
+
+# Tracking y serving
+mlflow>=2.20
+pyarrow>=18
+fastapi>=0.115
+uvicorn[standard]>=0.32
+
+# Dev
+jupyterlab>=4.2
+ipykernel>=6.29
+pytest>=8.3
+ruff>=0.7
+setuptools>=75

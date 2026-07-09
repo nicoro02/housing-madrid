@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+.env.local
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Data
+data/raw/
+data/interim/
+data/processed/
+*.parquet
+*.csv
+*.jsonl
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Playwright
+playwright-report/
+test-results/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker
+.docker/
+
+# MLflow local
+mlruns/
+mlartifacts/
+
+# OS
+.DS_Store
+Thumbs.db
